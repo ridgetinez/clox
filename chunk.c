@@ -73,19 +73,15 @@ static int writeConstantToValueArray(Chunk *chunk, Value value)
 static void addLongConstant(Chunk *chunk, int index, int line)
 {
     writeChunk(chunk, OP_CONSTANT_LONG, line);
-    assert((255 & (255 << 8)) == 0);
-    writeChunk(chunk, (index & (255 << 16)) >> 16, line);
-    printf("%d DEBUG1: %d %d\n", index, chunk->code[chunk->count-1], (index & (255 << 16)) >> 16);
-    writeChunk(chunk, (index & (255 << 8)) >> 8, line);
-    printf("%d DEBUG2: %d %d\n", index, chunk->code[chunk->count-1], (index & (255 << 8)) >> 8);
-    writeChunk(chunk, index & 255, line);
-    printf("%d DEBUG3: %d %d\n", index, chunk->code[chunk->count-1], index & (255));
+    writeChunk(chunk, (index >> 16) & 0xFF, line);
+    writeChunk(chunk, (index >> 8) & 0xFF, line);
+    writeChunk(chunk, index & 0xFF, line);
 }
 
 static void addShortConstant(Chunk *chunk, int index, int line)
 {
     writeChunk(chunk, OP_CONSTANT, line);
-    writeChunk(chunk, index, line);
+    writeChunk(chunk, index & 0xFF, line);
 }
 
 void writeConstant(Chunk *chunk, Value value, int line)
