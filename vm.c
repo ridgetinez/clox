@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <stdio.h>
 
 #include "common.h"
@@ -8,11 +9,15 @@
 #define READ_BYTE() (*vm.ip++)
 #define READ_SHORT_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define READ_LONG_CONSTANT() (vm.chunk->constants.values[READ_BYTE() << 16 | READ_BYTE() << 8 | READ_BYTE()])
-#define BINARY_OP(op) \
+#define BINARY_OP(valueType, op) \
     do { \
-        double a = pop(); \
-        double b = pop(); \
-        push(a op b); \
+      if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
+        runtimeError("Operands must be numbers."); \
+        return INTERPRET_RUNTIME_ERROR; \
+      } \
+      double b = AS_NUMBER(pop()); \
+      double a = AS_NUMBER(pop()); \
+      push(valueType(a op b)); \
     } while (false)
 
 VM vm;
@@ -22,17 +27,30 @@ static void resetStack()
     vm.stackTop = vm.stack;
 }
 
-/*
-static void inplace_modify(Value (*f)(Value))
+static Value peek(int distance)
 {
-    *(vm.stackTop - 1) = f(*(vm.stackTop - 1));
+    return *(vm.stackTop - 1 - distance);
 }
 
-static Value negate(Value x)
+static bool isFalsey(Value value)
 {
-    return -x;
+  return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
 }
-*/
+
+static void runtimeError(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputs("\n", stderr);
+
+    size_t instruction = vm.ip - vm.chunk->code - 1;
+    int line = getLine(vm.chunk, instruction);
+    fprintf(stderr, "[line %d] in script\n", line);
+    resetStack();
+}
+
 
 void initVM()
 {
@@ -43,7 +61,6 @@ void freeVM()
 {
 }
 
-/*
 static InterpretResult run()
 {
     while (true) {
@@ -72,26 +89,52 @@ static InterpretResult run()
                 push(READ_LONG_CONSTANT());
                 break;
             }
+            case OP_NIL:   push(NIL_VAL); break;
+            case OP_FALSE: push(BOOL_VAL(false)); break;
+            case OP_TRUE:  push(BOOL_VAL(true)); break;
+            case OP_NOT:   push(BOOL_VAL(isFalsey(pop()))); break;
             case OP_NEGATE: {
-                inplace_modify(negate);
+                if (!IS_NUMBER(peek(0))) {
+                    runtimeError("Operand must be a number.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(NUMBER_VAL(-AS_NUMBER(pop())));
                 break;
             }
-            case OP_ADD:      BINARY_OP(+); break;
-            case OP_SUBTRACT: BINARY_OP(-); break;
-            case OP_MULTIPLY: BINARY_OP(*); break;
-            case OP_DIVIDE:   BINARY_OP(/); break;
+            case OP_EQUAL: {
+                Value b = pop();
+                Value a = pop();
+                push(BOOL_VAL(valuesEqual(a, b)));
+                break;
+            }
+            case OP_GREATER:  BINARY_OP(BOOL_VAL, >); break;
+            case OP_LESS:     BINARY_OP(BOOL_VAL, <); break;
+            case OP_ADD:      BINARY_OP(NUMBER_VAL, +); break;
+            case OP_SUBTRACT: BINARY_OP(NUMBER_VAL, -); break;
+            case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *); break;
+            case OP_DIVIDE:   BINARY_OP(NUMBER_VAL, /); break;
             default: {
                 return INTERPRET_COMPILE_ERROR;
             }
         }
     }
 }
-*/
 
 InterpretResult interpret(const char *source)
 {
-  compile(source);
-  return INTERPRET_OK;;
+    Chunk chunk;
+    initChunk(&chunk);
+
+    if (!compile(source, &chunk)) {
+        freeChunk(&chunk);
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+    vm.chunk = &chunk;
+    vm.ip = vm.chunk->code;
+    InterpretResult res = run();
+    freeChunk(&chunk);
+    return res;
 }
 
 void push(Value value)
